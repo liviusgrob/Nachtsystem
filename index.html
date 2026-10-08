@@ -2,111 +2,24 @@
 <html lang="de">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Nachtsystem – Diagnose</title>
-<style>
-  body { background: #0a0a0f; color: #f5f5f7; font-family: -apple-system, sans-serif; padding: 20px; padding-top: calc(20px + env(safe-area-inset-top,0px)); }
-  h1 { font-size: 18px; }
-  .item { padding: 8px 12px; border-radius: 8px; background: #14141c; margin-bottom: 6px; font-family: ui-monospace, monospace; font-size: 13px; }
-  .ok { color: #7ee2a1; }
-  .bad { color: #f8a1a1; background: #2a0f0f; }
-  .warn { color: #fbc871; }
-  #err { background: #1a0606; color: #ff9a9a; padding: 12px; border-radius: 8px; margin-top: 12px; font-family: ui-monospace, monospace; font-size: 12px; white-space: pre-wrap; }
-</style>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#0a0a0f">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Nachtsystem">
+<meta name="format-detection" content="telephone=no">
+<title>Nachtsystem</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon.svg">
+<link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
-  <h1>Nachtsystem – Datei-Check</h1>
-  <div id="list">Prüfe Dateien…</div>
-  <div id="err"></div>
-
-  <script>
-    // Fang alle Fehler ab, BEVOR Module geladen werden
-    window.__diag_errors = [];
-    window.addEventListener('error', function(e){
-      window.__diag_errors.push('error: ' + (e.message || '?') + ' @ ' + (e.filename || '?') + ':' + (e.lineno || '?'));
-    }, true);
-    window.addEventListener('unhandledrejection', function(e){
-      window.__diag_errors.push('reject: ' + ((e.reason && e.reason.message) || e.reason || '?'));
-    });
-
-    var FILES = [
-      'index.html',
-      'manifest.json',
-      'service-worker.js',
-      'css/styles.css',
-      'icons/icon.svg',
-      'js/app.js',
-      'js/time.js',
-      'js/storage.js',
-      'js/state.js',
-      'js/events.js',
-      'js/rules.js',
-      'js/home.js',
-      'js/night.js',
-      'js/consequences.js',
-      'js/ai.js',
-      'js/evaluation.js',
-      'js/notifications.js',
-      'js/testmode.js',
-      'js/ui.js'
-    ];
-
-    var list = document.getElementById('list');
-    var errBox = document.getElementById('err');
-
-    (async function(){
-      list.innerHTML = '';
-      for (var i = 0; i < FILES.length; i++) {
-        var f = FILES[i];
-        var div = document.createElement('div');
-        div.className = 'item';
-        div.textContent = '… ' + f;
-        list.appendChild(div);
-
-        try {
-          var res = await fetch(f, { cache: 'no-store' });
-          if (!res.ok) {
-            div.className = 'item bad';
-            div.textContent = '✗ ' + f + ' → HTTP ' + res.status;
-          } else {
-            var text = await res.text();
-            var head = text.slice(0, 60).replace(/\s+/g, ' ');
-            var looksHtml = text.trim().startsWith('<!DOCTYPE') || text.trim().startsWith('<html');
-            if (looksHtml && f.endsWith('.js')) {
-              div.className = 'item bad';
-              div.textContent = '✗ ' + f + ' → liefert HTML statt JS (Datei fehlt?)';
-            } else {
-              div.className = 'item ok';
-              div.textContent = '✓ ' + f + ' (' + text.length + ' Bytes)';
-            }
-          }
-        } catch (e) {
-          div.className = 'item bad';
-          div.textContent = '✗ ' + f + ' → ' + (e.message || 'fetch failed');
-        }
-      }
-
-      // Jetzt versuchen, das Modul zu laden
-      var loadDiv = document.createElement('div');
-      loadDiv.className = 'item warn';
-      loadDiv.textContent = '… versuche js/app.js als Modul zu laden';
-      list.appendChild(loadDiv);
-
-      try {
-        await import('./js/app.js');
-        loadDiv.className = 'item ok';
-        loadDiv.textContent = '✓ js/app.js als Modul geladen';
-      } catch (e) {
-        loadDiv.className = 'item bad';
-        loadDiv.textContent = '✗ Modul-Ladefehler: ' + (e.message || e);
-      }
-
-      if (window.__diag_errors.length) {
-        errBox.textContent = window.__diag_errors.join('\n');
-      } else {
-        errBox.textContent = '(keine weiteren Fehler)';
-      }
-    })();
-  </script>
+  <div id="app" class="app"></div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <div id="modal-root"></div>
+  <noscript>Nachtsystem benötigt JavaScript.</noscript>
+  <script type="module" src="js/app.js"></script>
 </body>
 </html>
