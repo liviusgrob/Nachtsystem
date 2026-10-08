@@ -3,18 +3,33 @@
  * - Hält das komplette Datenmodell
  * - Persistiert automatisch über storage.js
  * - Benachrichtigt Listener bei Änderungen
+ * - Unterstützt silent saves, debounced saves, und Schema-Migration
  */
 
 import { storage } from './storage.js';
 
 const KEY = 'state';
-export const APP_VERSION = '1.0.0';
+export const APP_VERSION = '1.1.0';
+export const SCHEMA_VERSION = 1;
 
 let state = defaultState();
 const listeners = new Set();
+let saveTimer = null;
+
+/* ---------- Utility ---------- */
+
+export function deepClone(obj) {
+  if (typeof structuredClone === 'function') {
+    try { return structuredClone(obj); } catch {}
+  }
+  return JSON.parse(JSON.stringify(obj));
+}
+
+/* ---------- Default State ---------- */
 
 export function defaultState() {
   return {
+    schemaVersion: SCHEMA_VERSION,
     system: {
       version: APP_VERSION,
       setupCompleted: false,
@@ -44,7 +59,11 @@ export function defaultState() {
           { max: Infinity, points: -20 }
         ]
       },
-      streakRules: { resetOnViolation: true },
+      streakRules: {
+        resetOnViolation: true,
+        freezeEnabled: false,
+        freezePerWeek: 1
+      },
       consequenceRules: {
         enabled: true,
         triggerThreshold: 2,
@@ -74,6 +93,13 @@ export function defaultState() {
         endpoint: '',
         apiKey: '',
         model: ''
+      },
+      ui: {
+        theme: 'dark',
+        accent: 'violet',
+        fontScale: 1,
+        language: 'de',
+        timeFormat: '24h'
       }
     },
     status: {
@@ -87,7 +113,9 @@ export function defaultState() {
       lastDecision: null,
       lastConsequence: null,
       lastEvaluation: null,
-      lastError: null
+      lastError: null,
+      freezeUsedThisWeek: 0,
+      lastFreezeWeek: null
     },
     night: {
       active: false,
@@ -98,6 +126,7 @@ export function defaultState() {
       actualReturnTime: null,
       latenessMinutes: 0,
       returnStatus: 'unknown',
+      note: '',
       events: [],
       possibleViolations: [],
       confirmedViolations: []
@@ -107,6 +136,8 @@ export function defaultState() {
     consequences: []
   };
 }
+
+/* ---------- Accessors ---------- */
 
 export function getState() {
   return state;
@@ -127,16 +158,57 @@ export function setState(patch) {
   save();
 }
 
-export function save() {
+/* ---------- Persistence ---------- */
+
+function persist() {
   try {
     storage.set(KEY, state);
     state.system.lastDbAccess = new Date().toISOString();
   } catch (e) {
     console.error('[state] persist failed', e);
-    state.system.lastError = String(e && e.message || e);
+    state.system.lastError = String((e && e.message) || e);
   }
-  emit();
 }
+
+/**
+ * Speichert sofort und emittiert Listener.
+ * @param {{silent?:boolean}} opts – silent=true unterdrückt Listener (kein Re-Render)
+ */
+export function save(opts = {}) {
+  if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+  persist();
+  if (!opts.silent) emit();
+}
+
+/** Erzwingt sofortiges Speichern (Alias für save()). */
+export function saveNow(opts = {}) {
+  return save(opts);
+}
+
+/**
+ * Debounced speichern. Mehrere Aufrufe innerhalb von 150 ms werden
+ * zusammengefasst – nützlich für schnelles Tippen in Formularen.
+ */
+export function scheduleSave(delay = 150) {
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    saveTimer = null;
+    persist();
+    emit();
+  }, delay);
+}
+
+/** Wenn ein Prozess abbricht, aber die letzten Werte sichern soll. */
+export function flushSave() {
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+    persist();
+    emit();
+  }
+}
+
+/* ---------- Listeners ---------- */
 
 export function subscribe(fn) {
   listeners.add(fn);
@@ -149,13 +221,17 @@ function emit() {
   }
 }
 
+/* ---------- Load / Reset ---------- */
+
 export function loadState() {
   try {
     const loaded = storage.get(KEY);
     if (loaded && typeof loaded === 'object') {
-      state = mergeDeep(defaultState(), loaded);
+      const migrated = migrate(loaded);
+      state = mergeDeep(defaultState(), migrated);
     }
     state.system.version = APP_VERSION;
+    state.schemaVersion = SCHEMA_VERSION;
   } catch (e) {
     console.error('[state] load failed', e);
     state = defaultState();
@@ -168,13 +244,38 @@ export function resetState() {
   storage.remove(KEY);
 }
 
+/* ---------- Migration ---------- */
+
+/**
+ * Wendet Schema-Updates an, um alte State-Versionen auf die
+ * aktuelle Struktur zu bringen.
+ * Bei zukünftigen Schema-Änderungen (SCHEMA_VERSION++) hier ergänzen.
+ */
+function migrate(oldState) {
+  if (!oldState || typeof oldState !== 'object') return oldState;
+  const v = oldState.schemaVersion || 0;
+  let s = oldState;
+
+  // v0 → v1: nichts zu tun, aktuelle Struktur ist bereits vorhanden.
+  // Zukünftig:
+  // if (v < 2) { s = migrateV1toV2(s); }
+  // if (v < 3) { s = migrateV2toV3(s); }
+
+  s.schemaVersion = SCHEMA_VERSION;
+  return s;
+}
+
+/* ---------- Errors ---------- */
+
 export function logError(err) {
   const msg = typeof err === 'string' ? err : (err && err.message) || 'Unbekannter Fehler';
   state.status.lastError = msg;
   state.system.lastError = msg;
   try { console.warn('[error]', err); } catch {}
-  save();
+  save({ silent: true });
 }
+
+/* ---------- Helpers ---------- */
 
 function mergeDeep(target, src) {
   if (Array.isArray(target) || Array.isArray(src)) return src === undefined ? target : src;
